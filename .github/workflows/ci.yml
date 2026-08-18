@@ -1,0 +1,60 @@
+name: CI
+
+# Exercises this action against itself on every push, using the fixture
+# corpus from the main ag-ui-validate repo (public) and a pinned, published
+# CLI version — not `latest`, so a validator release can't silently break
+# this workflow, and not `local`, since this repo has no build of its own.
+#
+# Bump PINNED_VERSION when a release lands new CLI flags this action wants
+# to exercise here (e.g. once --fail-on and rule categories ship).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # 0.3.0 predates the --fail-on flag and rule categories, so this workflow
+  # can't yet exercise fail-on/category-grouped output end to end. Bump this
+  # once a release ships them, and add coverage for both alongside the bump.
+  PINNED_VERSION: "0.3.0"
+
+jobs:
+  self-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch fixtures from the main repo
+        uses: actions/checkout@v4
+        with:
+          repository: langport-dev/ag-ui-validate
+          sparse-checkout: |
+            spec/fixtures
+          sparse-checkout-cone-mode: false
+          path: fixtures-src
+
+      - name: action passes on a valid stream
+        id: good
+        uses: ./
+        with:
+          target: fixtures-src/spec/fixtures/valid/agentic-chat.jsonl
+          version: ${{ env.PINNED_VERSION }}
+
+      - name: action fails on a violating stream
+        id: bad
+        uses: ./
+        continue-on-error: true
+        with:
+          target: fixtures-src/spec/fixtures/invalid/AGUI203-unterminated-tool-call/stream.jsonl
+          version: ${{ env.PINNED_VERSION }}
+          sarif-file: agui.sarif
+
+      - name: assert the failing run behaved as documented
+        shell: bash
+        run: |
+          test "${{ steps.bad.outcome }}" = "failure"
+          test "${{ steps.bad.outputs.errors }}" = "1"
+          test "${{ steps.good.outputs.errors }}" = "0"
+          test -n "${{ steps.bad.outputs.report-path }}"
+          test -n "${{ steps.good.outputs.report-path }}"
+          node -e "const s = JSON.parse(require('node:fs').readFileSync('agui.sarif', 'utf8')); if (s.version !== '2.1.0') process.exit(1)"

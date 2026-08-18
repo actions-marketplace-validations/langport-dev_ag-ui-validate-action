@@ -1,0 +1,33 @@
+name: Release
+
+# Retargets the moving major tag (e.g. v1) to the commit a new immutable
+# release tag (vX.Y.Z) points at, so `uses: .../ag-ui-validate-action@v1`
+# always resolves to the latest v1.x.y release without users re-pinning.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  retag-major:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move the major tag to this release
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release tag '$TAG' is not vX.Y.Z — not retagging a major version"
+            exit 1
+          fi
+          MAJOR="${TAG%%.*}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "$MAJOR" "$TAG"
+          git push origin "$MAJOR" --force
